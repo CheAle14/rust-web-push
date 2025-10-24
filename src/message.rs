@@ -10,39 +10,33 @@ use crate::{
 };
 
 /// Encryption keys from the client.
-#[derive(Debug, Deserialize, Serialize, Clone, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
-pub struct SubscriptionKeys {
-    /// The public key. Base64-encoded, URL-safe alphabet, no padding.
-    pub p256dh: String,
-    /// Authentication secret. Base64-encoded, URL-safe alphabet, no padding.
-    pub auth: String,
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
+pub struct SubscriptionKeys<'keys> {
+    /// The public key.
+    pub p256dh: &'keys [u8],
+    /// Authentication secret.
+    pub auth: &'keys [u8],
 }
 
 /// Client info for sending the notification. Maps the values from browser's
 /// subscription info JSON data (AKA pushSubscription object).
 ///
 /// Client pushSubscription objects can be directly deserialized into this struct using serde.
-#[derive(Debug, Deserialize, Serialize, Clone, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
-pub struct SubscriptionInfo {
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd, Default, Hash)]
+pub struct SubscriptionInfo<'keys> {
     /// The endpoint URI for sending the notification.
-    pub endpoint: String,
+    pub endpoint: &'keys str,
     /// The encryption key and secret for payload encryption.
-    pub keys: SubscriptionKeys,
+    pub keys: SubscriptionKeys<'keys>,
 }
 
-impl SubscriptionInfo {
+impl<'keys> SubscriptionInfo<'keys> {
     /// A constructor function to create a new `SubscriptionInfo`, if not using
     /// Serde's serialization.
-    pub fn new<S>(endpoint: S, p256dh: S, auth: S) -> SubscriptionInfo
-    where
-        S: Into<String>,
-    {
+    pub fn new(endpoint: &'keys str, p256dh: &'keys [u8], auth: &'keys [u8]) -> SubscriptionInfo<'keys> {
         SubscriptionInfo {
-            endpoint: endpoint.into(),
-            keys: SubscriptionKeys {
-                p256dh: p256dh.into(),
-                auth: auth.into(),
-            },
+            endpoint,
+            keys: SubscriptionKeys { p256dh, auth },
         }
     }
 }
@@ -103,8 +97,8 @@ struct WebPushPayloadBuilder<'a> {
 }
 
 /// The main class for creating a notification payload.
-pub struct WebPushMessageBuilder<'a> {
-    subscription_info: &'a SubscriptionInfo,
+pub struct WebPushMessageBuilder<'a, 'keys> {
+    subscription_info: &'a SubscriptionInfo<'keys>,
     payload: Option<WebPushPayloadBuilder<'a>>,
     ttl: u32,
     urgency: Option<Urgency>,
@@ -112,12 +106,12 @@ pub struct WebPushMessageBuilder<'a> {
     vapid_signature: Option<VapidSignature>,
 }
 
-impl<'a> WebPushMessageBuilder<'a> {
+impl<'a, 'keys> WebPushMessageBuilder<'a, 'keys> {
     /// Creates a builder for generating the web push payload.
     ///
     /// All parameters are from the subscription info given by browser when
     /// subscribing to push notifications.
-    pub fn new(subscription_info: &'a SubscriptionInfo) -> WebPushMessageBuilder<'a> {
+    pub fn new(subscription_info: &'a SubscriptionInfo<'keys>) -> WebPushMessageBuilder<'a, 'keys> {
         WebPushMessageBuilder {
             subscription_info,
             ttl: 2_419_200,
@@ -187,12 +181,12 @@ impl<'a> WebPushMessageBuilder<'a> {
             .transpose()?;
 
         if let Some(payload) = self.payload {
-            let p256dh = Base64UrlSafeNoPadding::decode_to_vec(&self.subscription_info.keys.p256dh, None)
-                .map_err(|_| WebPushError::InvalidCryptoKeys)?;
-            let auth = Base64UrlSafeNoPadding::decode_to_vec(&self.subscription_info.keys.auth, None)
-                .map_err(|_| WebPushError::InvalidCryptoKeys)?;
-
-            let http_ece = HttpEce::new(payload.encoding, &p256dh, &auth, self.vapid_signature);
+            let http_ece = HttpEce::new(
+                payload.encoding,
+                &self.subscription_info.keys.p256dh,
+                &self.subscription_info.keys.auth,
+                self.vapid_signature,
+            );
 
             Ok(WebPushMessage {
                 endpoint,
