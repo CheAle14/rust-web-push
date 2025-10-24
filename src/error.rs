@@ -107,6 +107,13 @@ impl From<isahc::Error> for WebPushError {
     }
 }
 
+#[cfg(feature = "reqwest-client")]
+impl From<reqwest::Error> for WebPushError {
+    fn from(_: reqwest::Error) -> Self {
+        Self::Unspecified
+    }
+}
+
 impl From<IoError> for WebPushError {
     fn from(err: IoError) -> WebPushError {
         WebPushError::Io(err)
